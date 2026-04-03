@@ -231,8 +231,11 @@ def _preprocess(raw: np.ndarray, cfg: Config) -> np.ndarray:
             order=cfg.data.lowpass_order,
         )
 
-    kit = compute_kit(raw, cfg)  # (N, 128, 3)
-    data = np.concatenate([raw, kit], axis=-1)  # (N, 128, 12)
+    if cfg.ablation.use_kit:
+        kit = compute_kit(raw, cfg)  # (N, 128, 3)
+        data = np.concatenate([raw, kit], axis=-1)  # (N, 128, 12)
+    else:
+        data = raw.copy()  # (N, 128, 9) — no physics prior
 
     # Per-channel z-score normalisation (computed on *this* split for now)
     mean = data.mean(axis=(0, 1), keepdims=True)

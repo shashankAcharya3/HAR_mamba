@@ -134,9 +134,19 @@ class FinetuneConfig:
     warmup_epochs: int = 5
     scheduler: str = "cosine"
     label_fractions: List[float] = field(
-        default_factory=lambda: [0.01, 0.05, 0.10, 0.25, 1.0]
+        default_factory=lambda: [0.01, 0.05, 0.10, 0.25, 0.35, 0.45, 1.0]
     )
     freeze_encoder: bool = False      # True → linear probe
+
+
+@dataclass
+class AblationConfig:
+    """Ablation study flags — toggle individual components on/off."""
+
+    use_kit: bool = True              # Pillar 1: KIT physics prior
+    use_pdgm: bool = True             # Pillar 2: dynamics-guided masking
+    use_bidirectional: bool = True    # Pillar 3: bidirectional SSM
+    use_pretraining: bool = True      # Self-supervised pretraining phase
 
 
 @dataclass
@@ -149,6 +159,7 @@ class Config:
     masking: MaskingConfig = field(default_factory=MaskingConfig)
     pretrain: PretrainConfig = field(default_factory=PretrainConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+    ablation: AblationConfig = field(default_factory=AblationConfig)
 
     device: torch.device = field(default_factory=_resolve_device)
     seed: int = 42

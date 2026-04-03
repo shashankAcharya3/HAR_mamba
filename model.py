@@ -213,17 +213,20 @@ class BiMambaBlock(nn.Module):
                └── Flip → MambaBlock_bwd → Flip ──┘
     """
 
-    def __init__(self, d_model: int, d_state: int, d_conv: int, expand: int) -> None:
+    def __init__(self, d_model: int, d_state: int, d_conv: int, expand: int,
+                 bidirectional: bool = True) -> None:
         super().__init__()
+        self.bidirectional = bidirectional
         self.fwd_block = MambaBlock(d_model, d_state, d_conv, expand)
-        self.bwd_block = MambaBlock(d_model, d_state, d_conv, expand)
 
-        # Learnable gate that weights fwd vs bwd contributions
-        self.gate = nn.Sequential(
-            nn.Linear(d_model * 2, d_model),
-            nn.Sigmoid(),
-        )
-        self.merge = nn.Linear(d_model * 2, d_model, bias=False)
+        if bidirectional:
+            self.bwd_block = MambaBlock(d_model, d_state, d_conv, expand)
+            # Learnable gate that weights fwd vs bwd contributions
+            self.gate = nn.Sequential(
+                nn.Linear(d_model * 2, d_model),
+                nn.Sigmoid(),
+            )
+            self.merge = nn.Linear(d_model * 2, d_model, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -236,6 +239,10 @@ class BiMambaBlock(nn.Module):
         (B, P, d_model)
         """
         h_fwd = self.fwd_block(x)                       # (B, P, H)
+
+        if not self.bidirectional:
+            return h_fwd  # Ablation: unidirectional only
+
         h_bwd = self.bwd_block(x.flip(dims=[1])).flip(dims=[1])  # (B, P, H)
 
         combined = torch.cat([h_fwd, h_bwd], dim=-1)    # (B, P, 2H)
@@ -285,6 +292,7 @@ class PDGM(nn.Module):
         self.min_prob = cfg.masking.min_prob
         self.patch_size = cfg.patch.patch_size
         self.total_channels = cfg.data.total_input_channels
+        self.use_pdgm = cfg.ablation.use_pdgm
 
     def _compute_patch_intensity(self, raw_window: torch.Tensor) -> torch.Tensor:
         """Compute per-patch motion intensity from the raw window.
@@ -334,13 +342,16 @@ class PDGM(nn.Module):
         num_masked = int(self.mask_ratio * P)
         num_visible = P - num_masked
 
-        # ── Step 1: Compute intensity ─────────────────────────────────
-        intensity = self._compute_patch_intensity(raw_window)  # (B, P)
-
-        # ── Step 2: Convert to sampling probabilities ─────────────────
-        probs = F.softmax(intensity / self.temperature, dim=-1)  # (B, P)
-        probs = probs.clamp(min=self.min_prob)
-        probs = probs / probs.sum(dim=-1, keepdim=True)  # re-normalise
+        # ── Step 1: Compute masking probabilities ─────────────────────
+        if self.use_pdgm:
+            # Dynamics-guided: high-motion patches are more likely masked
+            intensity = self._compute_patch_intensity(raw_window)  # (B, P)
+            probs = F.softmax(intensity / self.temperature, dim=-1)  # (B, P)
+            probs = probs.clamp(min=self.min_prob)
+            probs = probs / probs.sum(dim=-1, keepdim=True)
+        else:
+            # Ablation: uniform random masking (standard MAE-style)
+            probs = torch.ones(B, P, device=patches.device) / P
 
         # ── Step 3: Sample without replacement ────────────────────────
         # Use Gumbel-top-k trick for differentiability-friendly sampling
@@ -415,6 +426,7 @@ class MaskedMambaAutoencoder(nn.Module):
                 d_state=cfg.mamba.d_state,
                 d_conv=cfg.mamba.d_conv,
                 expand=cfg.mamba.expand,
+                bidirectional=cfg.ablation.use_bidirectional,
             )
             for _ in range(cfg.mamba.num_layers)
         ])

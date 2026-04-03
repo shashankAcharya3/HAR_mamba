@@ -177,9 +177,12 @@ def finetune(
 
     # ── Load pretrained encoder ───────────────────────────────────────
     autoencoder = MaskedMambaAutoencoder(cfg).to(device)
-    state = torch.load(pretrained_path, map_location=device, weights_only=True)
-    autoencoder.load_state_dict(state)
-    print(f"  Loaded pretrained encoder from: {pretrained_path}")
+    if cfg.ablation.use_pretraining and pretrained_path.exists():
+        state = torch.load(pretrained_path, map_location=device, weights_only=True)
+        autoencoder.load_state_dict(state)
+        print(f"  Loaded pretrained encoder from: {pretrained_path}")
+    else:
+        print("  Using RANDOM INIT encoder (no pretraining)")
 
     # ── Build classifier ──────────────────────────────────────────────
     classifier = HARClassifier(autoencoder, cfg).to(device)
